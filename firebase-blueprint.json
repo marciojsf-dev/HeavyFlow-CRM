@@ -1,0 +1,153 @@
+{
+  "entities": {
+    "team": {
+      "title": "Team",
+      "description": "Represents a business or organization using the CRM.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Team name" },
+        "createdAt": { "type": "number", "description": "Timestamp" }
+      },
+      "required": ["name", "createdAt"]
+    },
+    "userProfile": {
+      "title": "UserProfile",
+      "description": "User profile with their team assignment and role.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "format": "email" },
+        "name": { "type": "string" },
+        "teamId": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "agent"] },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["email", "name", "teamId", "role", "createdAt"]
+    },
+    "contact": {
+      "title": "Contact",
+      "description": "A customer who communicates with the team.",
+      "type": "object",
+      "properties": {
+        "teamId": { "type": "string" },
+        "phone": { "type": "string" },
+        "name": { "type": "string" },
+        "notes": { "type": "string" },
+        "category": { "type": "string" },
+        "optOut": { "type": "boolean" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["teamId", "phone", "createdAt"]
+    },
+    "conversation": {
+      "title": "Conversation",
+      "description": "A chat session between a team and a contact.",
+      "type": "object",
+      "properties": {
+        "teamId": { "type": "string" },
+        "contactId": { "type": "string" },
+        "status": { "type": "string", "enum": ["open", "closed", "snoozed", "pending"] },
+        "agentId": { "type": "string" },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "lastMessageAt": { "type": "object" },
+        "unreadCount": { "type": "number" },
+        "createdAt": { "type": "object" },
+        "updatedAt": { "type": "object" }
+      },
+      "required": ["teamId", "contactId", "status", "createdAt", "updatedAt"]
+    },
+    "message": {
+      "title": "Message",
+      "description": "A message within a conversation.",
+      "type": "object",
+      "properties": {
+        "conversationId": { "type": "string" },
+        "content": { "type": "string" },
+        "type": { "type": "string", "enum": ["text", "template", "image"] },
+        "direction": { "type": "string", "enum": ["inbound", "outbound"] },
+        "status": { "type": "string", "enum": ["sent", "delivered", "read", "failed"] },
+        "timestamp": { "type": "number" }
+      },
+      "required": ["conversationId", "content", "type", "direction", "status", "timestamp"]
+    },
+    "template": {
+      "title": "Template",
+      "description": "A predefined message template approved by Meta.",
+      "type": "object",
+      "properties": {
+        "teamId": { "type": "string" },
+        "name": { "type": "string" },
+        "language": { "type": "string" },
+        "category": { "type": "string", "enum": ["UTILITY", "MARKETING", "AUTHENTICATION"] },
+        "status": { "type": "string", "enum": ["PENDING", "APPROVED", "REJECTED"] },
+        "components": { "type": "array" },
+        "variables": { "type": "object", "description": "Sample variable values for Meta approval" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["teamId", "name", "language", "category", "status", "components", "createdAt", "updatedAt"]
+    },
+    "customStatus": {
+      "title": "Custom Status",
+      "type": "object",
+      "properties": {
+        "teamId": { "type": "string" },
+        "name": { "type": "string" },
+        "color": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["teamId", "name", "color", "createdAt"]
+    },
+    "campaign": {
+      "title": "Campaign",
+      "type": "object",
+      "properties": {
+        "teamId": { "type": "string" },
+        "name": { "type": "string" },
+        "templateId": { "type": "string" },
+        "scheduledAt": { "type": "number" },
+        "status": { "type": "string", "enum": ["draft", "scheduled", "running", "completed", "failed"] },
+        "audienceSize": { "type": "number" },
+        "sentCount": { "type": "number" },
+        "failedCount": { "type": "number" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["teamId", "name", "templateId", "scheduledAt", "status", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/teams/{teamId}": {
+      "schema": { "$ref": "#/entities/team" },
+      "description": "Global teams"
+    },
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/userProfile" },
+      "description": "User profiles with their access role and team."
+    },
+    "/contacts/{contactId}": {
+      "schema": { "$ref": "#/entities/contact" },
+      "description": "Global contacts, partitioned by teamId"
+    },
+    "/conversations_metadata/{conversationId}": {
+      "schema": { "$ref": "#/entities/conversation" },
+      "description": "Conversations linked to teamId"
+    },
+    "/conversations/{conversationId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/message" },
+      "description": "Messages inside a conversation"
+    },
+    "/templates/{templateId}": {
+      "schema": { "$ref": "#/entities/template" },
+      "description": "Message templates"
+    },
+    "/customStatuses/{statusId}": {
+      "schema": { "$ref": "#/entities/customStatus" },
+      "description": "User-defined custom statuses"
+    },
+    "/campaigns/{campaignId}": {
+      "schema": { "$ref": "#/entities/campaign" },
+      "description": "Mass messaging campaigns"
+    }
+  }
+}

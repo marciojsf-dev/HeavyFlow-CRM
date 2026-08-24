@@ -1,0 +1,8 @@
+{
+  "name": "HeavyFlow CRM",
+  "description": "Plataforma de WhatsApp Business multicanal para gestão de vendas e proteção veicular de pesados.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

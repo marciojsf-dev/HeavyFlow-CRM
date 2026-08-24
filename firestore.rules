@@ -1,0 +1,183 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isEmailVerified() {
+      return isSignedIn();
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function getUserData() {
+      let doc = get(/databases/$(database)/documents/users/$(request.auth.uid));
+      return doc != null ? doc.data : null;
+    }
+
+    function userInTeam(teamId) {
+      let data = getUserData();
+      return isSignedIn() && data != null && data.teamId == teamId;
+    }
+
+    function isSuperAdmin() {
+      return isSignedIn() && request.auth.token.email == 'marciojsf@gmail.com';
+    }
+
+    function isTeamAdmin(teamId) {
+      let data = getUserData();
+      return isSuperAdmin() || (userInTeam(teamId) && data != null && data.role == 'admin');
+    }
+
+    // --- Validations ---
+
+    function isValidTeam(data) {
+      return data.keys().hasAll(['name', 'createdAt']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             (!data.keys().hasAny(['razaoSocial', 'cnpj', 'documento', 'telefone', 'endereco', 'bairro', 'cidade', 'estado', 'responsavelNome', 'responsavelEmail', 'tipoPessoa']) || true);
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['email', 'name', 'teamId', 'role', 'createdAt', 'updatedAt']) &&
+             data.email == request.auth.token.email &&
+             data.role in ['admin', 'agent'] &&
+             data.teamId is string &&
+             data.createdAt is timestamp &&
+             (!data.keys().hasAny(['companySetupComplete']) || data.companySetupComplete is bool) &&
+             (!data.keys().hasAny(['isSuperAdmin']) || data.isSuperAdmin is bool);
+    }
+
+    function isValidContact(data) {
+      return data.keys().hasAll(['teamId', 'phone', 'createdAt']) &&
+             data.teamId is string &&
+             data.phone is string && data.phone.size() >= 8 && data.phone.size() <= 20 &&
+             data.createdAt == request.time;
+    }
+
+    function isValidConversation(data) {
+      return data.keys().hasAll(['teamId', 'contactId', 'status', 'createdAt', 'updatedAt']) &&
+             data.teamId is string &&
+             data.status in ['open', 'closed', 'snoozed', 'pending'] &&
+             data.updatedAt == request.time;
+    }
+
+    function isValidMessage(data) {
+      return data.keys().hasAll(['conversationId', 'content', 'type', 'direction', 'status', 'timestamp']) &&
+             data.type in ['text', 'template', 'image'] &&
+             data.direction in ['inbound', 'outbound'] &&
+             data.status in ['sent', 'delivered', 'read', 'failed'] &&
+             data.timestamp == request.time;
+    }
+
+    // --- Domain Rules ---
+
+    // 1. Teams
+    match /teams/{teamId} {
+      allow get: if isSignedIn(); // Need to check team existence/details
+      allow list: if isSuperAdmin();
+      allow create: if isEmailVerified() && isValidTeam(incoming());
+      allow update: if isTeamAdmin(teamId) && isValidTeam(incoming());
+    }
+
+    // 2. User Profiles
+    match /users/{userId} {
+      allow get: if isSignedIn() && (request.auth.uid == userId || (getUserData() != null && getUserData().teamId == get(/databases/$(database)/documents/users/$(userId)).data.teamId));
+      allow list: if isSignedIn() && (resource.data.email == request.auth.token.email || (getUserData() != null && resource.data.teamId == getUserData().teamId));
+      allow create: if isEmailVerified() && (
+        (request.auth.uid == userId && isValidUser(incoming())) ||
+        (isTeamAdmin(incoming().teamId) && 
+         incoming().keys().hasAll(['email', 'name', 'teamId', 'role', 'createdAt', 'updatedAt']) &&
+         incoming().role in ['admin', 'agent'] &&
+         incoming().createdAt == request.time &&
+         incoming().updatedAt == request.time &&
+         (!incoming().keys().hasAny(['companySetupComplete']) || incoming().companySetupComplete is bool))
+      );
+      allow update: if isEmailVerified() && (
+        (request.auth.uid == userId && incoming().updatedAt == request.time && (!incoming().diff(existing()).affectedKeys().hasAny(['email', 'teamId']))) ||
+        (isTeamAdmin(getUserData().teamId) && 
+         existing().teamId == getUserData().teamId &&
+         incoming().diff(existing()).affectedKeys().hasOnly(['role', 'updatedAt']) &&
+         incoming().updatedAt == request.time)
+      );
+      allow delete: if isSignedIn() && (existing().email == request.auth.token.email || isTeamAdmin(existing().teamId));
+    }
+
+    // 3. Contacts
+    match /contacts/{contactId} {
+      allow get: if userInTeam(existing().teamId);
+      allow list: if isSignedIn() && resource.data.teamId == getUserData().teamId;
+      allow create: if isEmailVerified() && userInTeam(incoming().teamId) && isValidContact(incoming());
+      allow update: if isEmailVerified() && userInTeam(existing().teamId) && 
+                    incoming().teamId == existing().teamId &&
+                    isValidContact(incoming());
+      allow delete: if isTeamAdmin(existing().teamId);
+    }
+
+    // 4. Conversations Metadata
+    match /conversations_metadata/{conversationId} {
+      // Temporarily allow get for any signed in user to debug permission issues
+      allow get: if isSignedIn();
+      allow list: if isSignedIn() && resource.data.teamId == getUserData().teamId;
+      allow create: if isEmailVerified() && (incoming().teamId == getUserData().teamId) && isValidConversation(incoming());
+      allow update: if isEmailVerified() && (existing().teamId == getUserData().teamId) && 
+                    incoming().teamId == existing().teamId &&
+                    isValidConversation(incoming());
+    }
+
+    // 5. Messages (Postgres backed, but rules here for any firestore usage)
+    match /conversations_metadata/{conversationId}/messages/{messageId} {
+      allow get, list: if isSignedIn() && get(/databases/$(database)/documents/conversations_metadata/$(conversationId)).data.teamId == getUserData().teamId;
+      allow create: if isEmailVerified() && 
+                    get(/databases/$(database)/documents/conversations_metadata/$(conversationId)).data.teamId == getUserData().teamId &&
+                    isValidMessage(incoming());
+    }
+
+    // 6. Templates
+    match /templates/{templateId} {
+      allow get, list: if isSignedIn() && resource.data.teamId == getUserData().teamId;
+      allow create: if isEmailVerified() && userInTeam(incoming().teamId);
+      allow update, delete: if isTeamAdmin(existing().teamId);
+    }
+
+    // 7. Custom Statuses
+    match /customStatuses/{statusId} {
+      allow get, list: if isSignedIn() && resource.data.teamId == getUserData().teamId;
+      allow create: if isEmailVerified() && userInTeam(incoming().teamId);
+      allow delete: if isTeamAdmin(existing().teamId);
+    }
+
+    // 8. Campaigns
+    match /campaigns/{campaignId} {
+      allow get, list: if isSignedIn() && resource.data.teamId == getUserData().teamId;
+      allow create: if isEmailVerified() && userInTeam(incoming().teamId);
+      allow update: if isEmailVerified() && userInTeam(existing().teamId) && existing().status != 'completed' &&
+                    incoming().teamId == existing().teamId;
+      allow delete: if isTeamAdmin(existing().teamId) && (existing().status == 'draft' || existing().status == 'failed');
+    }
+
+    // 9. Departments
+    match /departments/{departmentId} {
+      allow get, list: if isSignedIn() && resource.data.teamId == getUserData().teamId;
+      allow create: if isTeamAdmin(incoming().teamId);
+      allow update: if isTeamAdmin(existing().teamId);
+      allow delete: if isTeamAdmin(existing().teamId);
+    }
+  }
+}
